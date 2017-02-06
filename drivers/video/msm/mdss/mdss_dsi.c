@@ -1530,6 +1530,24 @@ int dsi_panel_device_register(struct device_node *pan_node,
 		pr_err("%s:%d, reset gpio not specified\n",
 						__func__, __LINE__);
 
+#ifdef CONFIG_ZTEMT_LCD_POWER_CONTRL
+/*avdd neg ctl board2 add ,mayu 6.25*/
+	ctrl_pdata->avdd_neg_en_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+						     "qcom,platform-avddn-enable-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->avdd_neg_en_gpio)) {
+		pr_err("%s:%d, avdd_neg_en_gpio gpio not specified\n",
+						__func__, __LINE__);
+	} else {
+		rc = gpio_request(ctrl_pdata->avdd_neg_en_gpio, "lcd_avdd_neg_enable");
+		if (rc) {
+			pr_err("request reset gpio failed, rc=%d\n",
+			       rc);
+			gpio_free(ctrl_pdata->avdd_neg_en_gpio);
+			return -ENODEV;
+		}
+	}
+#endif	
+
 	if (pinfo->mode_gpio_state != MODE_GPIO_NOT_VALID) {
 
 		ctrl_pdata->mode_gpio = of_get_named_gpio(
@@ -1555,7 +1573,19 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	}
 
 	ctrl_pdata->panel_data.event_handler = mdss_dsi_event_handler;
+
+	/*qcom ori*/
 	ctrl_pdata->check_status = mdss_dsi_bta_status_check;
+
+#ifdef CONFIG_ZTEMT_NX404H_LCD
+	if (ctrl_pdata->panel_name
+           && !strcmp(ctrl_pdata->panel_name, "otm1282a 720p command mode dsi panel")) {
+		ctrl_pdata->check_status = zte_check_status_by_te;
+	}else{
+    //other lcd run empty fun
+    ctrl_pdata->check_status = zte_check_status_ok;
+	}
+#endif
 
 	if (ctrl_pdata->bklt_ctrl == BL_PWM)
 		mdss_dsi_panel_pwm_cfg(ctrl_pdata);

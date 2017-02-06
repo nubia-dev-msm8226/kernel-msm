@@ -95,6 +95,26 @@
 
 #define QPNP_BMS_DEV_NAME "qcom,qpnp-bms"
 
+//#define CONFIG_ZTEMT_COMM_CHARGE_X
+
+
+#ifdef CONFIG_ZTEMT_COMM_CHARGE_X
+//打开调试接口
+ #undef pr_debug
+ #define pr_debug   pr_info
+
+#undef KERN_INFO
+#define KERN_INFO KERN_ERR
+#endif
+
+#ifdef CONFIG_ZTEMT_COMM_CHARGE
+static int debug_mask_bms = 1;
+module_param_named(debug_mask_bms, debug_mask_bms, int, S_IRUGO | S_IWUSR | S_IWGRP);
+#define DBG_BMS(x...) do {if (debug_mask_bms) pr_info(">>ZTEMT_BMS>>  " x); } while (0)
+#endif
+
+#define ZTEMT_BMS_DEBUG 1
+
 enum {
 	SHDW_CC,
 	CC
@@ -1438,8 +1458,11 @@ static int calculate_unusable_charge_uah(struct qpnp_bms_chip *chip,
 	uuc_iavg_ma = 0;
 	if (chip->iavg_num_samples != 0) {
 		for (i = 0; i < chip->iavg_num_samples; i++) {
+		#ifdef CONFIG_ZTEMT_COMM_CHARGE 
+		#else
 			pr_debug("iavg_samples_ma[%d] = %d\n", i,
 					chip->iavg_samples_ma[i]);
+		 #endif
 			uuc_iavg_ma += chip->iavg_samples_ma[i];
 		}
 
@@ -2411,6 +2434,9 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 }
 
 #define SLEEP_RECALC_INTERVAL	3
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+#define UPDATED_BATT_TEMP_STEP   20
+#endif
 static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 					struct raw_soc_params *raw,
 					int batt_temp)
@@ -2418,7 +2444,13 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	struct soc_params params;
 	int soc, previous_soc, shutdown_soc, new_calculated_soc;
 	int remaining_usable_charge_uah;
-
+	#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+	static int  previous_batt_temp  = 0;
+	#endif
+	#ifdef CONFIG_ZTEMT_NX506J_CHARGE
+	int batt_uv;
+	#endif
+	
 	calculate_soc_params(chip, raw, &params, batt_temp);
 	if (!is_battery_present(chip)) {
 		pr_debug("battery gone, reporting 100\n");
@@ -2517,8 +2549,17 @@ done_calculating:
 	mutex_unlock(&chip->last_soc_mutex);
 	wake_up_interruptible(&chip->bms_wait_queue);
 
-	if (new_calculated_soc != previous_soc && chip->bms_psy_registered) {
+	if (
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+		((new_calculated_soc != previous_soc)||(abs(batt_temp - previous_batt_temp)>UPDATED_BATT_TEMP_STEP))
+#else		
+		(new_calculated_soc != previous_soc)
+#endif			
+		&& chip->bms_psy_registered) {
 		power_supply_changed(&chip->bms_psy);
+#if defined(CONFIG_ZTEMT_COMM_CHARGE) || defined(CONFIG_ZTEMT_NX506J_CHARGE)		
+		previous_batt_temp = batt_temp;
+#endif
 		pr_debug("power supply changed\n");
 	} else {
 		/*
@@ -3417,7 +3458,13 @@ static void battery_insertion_check(struct qpnp_bms_chip *chip)
 /* Returns capacity as a SoC percentage between 0 and 100 */
 static int get_prop_bms_capacity(struct qpnp_bms_chip *chip)
 {
+ #ifdef CONFIG_ZTEMT_COMM_CHARGE
+	int soc = report_state_of_charge(chip);
+	soc = bound_soc(soc);
+	return soc;
+#else
 	return report_state_of_charge(chip);
+#endif
 }
 
 static void qpnp_bms_external_power_changed(struct power_supply *psy)
@@ -3680,7 +3727,13 @@ static int set_battery_data(struct qpnp_bms_chip *chip)
 	if (chip->batt_type == BATT_DESAY) {
 		batt_data = &desay_5200_data;
 	} else if (chip->batt_type == BATT_PALLADIUM) {
+#ifdef CONFIG_ZTEMT_2400AMH_BATTERY
+		batt_data = &ztemt_2400mAh_data;
+#elif defined(CONFIG_ZTEMT_2000AMH_BATTERY)
+		batt_data = &ztemt_2000mAh_data;
+#else	
 		batt_data = &palladium_1500_data;
+#endif
 	} else if (chip->batt_type == BATT_OEM) {
 		batt_data = &oem_batt_data;
 	} else if (chip->batt_type == BATT_QRD_4V35_2000MAH) {

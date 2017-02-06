@@ -13,7 +13,11 @@ config POWER_SUPPLY_DEBUG
 	help
 	  Say Y here to enable debugging messages for power supply class
 	  and drivers.
-
+config ZTEMT_POWER_DEBUG
+	bool "ZTEMT Power Debug Feature"
+	default y
+	help
+	  ZTEMT Power Debug Feature
 config PDA_POWER
 	tristate "Generic PDA/phone power driver"
 	depends on !S390
@@ -497,7 +501,49 @@ config AB8500_BATTERY_THERM_ON_BATCTRL
 	help
 	  Say Y to enable battery temperature measurements using
 	  thermistor connected on BATCTRL ADC.
+	  
+################ZTEMT charger
+menu "ZTEMT charger and battery"
+config ZTEMT_CHARGE_BQ24192
+	bool "ZTEMT Charge bq24192"
+	default n
+	help
+	  ZTEMT Charge bq24192
 
+config ZTEMT_CHARGE_QPNP
+	bool "ZTEMT Charge qpnp"
+	default n
+	help
+	  ZTEMT Charge qpnp
+config ZTEMT_COMM_CHARGE
+	bool "ZTEMT comm qpnp Charge"
+	default n
+	help
+	  ZTEMT comm qpnp Charge 
+config ZTEMT_CHARGE_SUB
+	bool "ZTEMT  Charge feature for special function"
+	default n
+	help
+	  ZTEMT  Charge feature for special function
+config ZTEMT_CHG_PARAM_CHECK
+	bool "ZTEMT  Charge parameters check"
+	default n
+	help
+	  ZTEMT  Charge parameters check
+################ztemt battery config
+config ZTEMT_2000AMH_BATTERY
+	bool "ZTEMT 2000AMH BATTERY"
+	default n
+	help
+	  ZTEMT 2000AMH Battery Feature
+	  
+config ZTEMT_2400AMH_BATTERY
+	bool "ZTEMT 2400AMH BATTERY"
+	default n
+	help
+	  ZTEMT 2400AMH Battery Feature
+endmenu
+################ZTEMT end
 config QPNP_BMS
 	tristate "QPNP Battery Monitoring System driver"
 	depends on SPMI

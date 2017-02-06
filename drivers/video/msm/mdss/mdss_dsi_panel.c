@@ -24,9 +24,22 @@
 
 #include "mdss_dsi.h"
 
+#if defined(CONFIG_ZTEMT_NX404H_LCD) || defined(CONFIG_ZTEMT_NE501_LCD)
+struct mdss_dsi_ctrl_pdata *zte_ctrl_post;
+#endif
 #define DT_CMD_HDR 6
 
 #define MIN_REFRESH_RATE 30
+
+#ifdef CONFIG_ZTEMT_MIPI_720P_R69431_SHARP_IPS_4P7
+/*NX404 mayu*/
+#define PW_ON_AVDD_EN_SLEEP   2
+#define PW_ON_AVDD_NEG_SLEEP  6
+
+#define PW_OFF_AVDD_NEG_SLEEP 10
+#define PW_OFF_AVDD_EN_SLEEP  10
+#define PW_OFF_RESET_SLEEP    5
+#endif
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
@@ -207,6 +220,93 @@ disp_en_gpio_err:
 	return rc;
 }
 
+
+/*luochangyang for sequence 2014/06/09*/
+/*Power On by LCM spec*/
+#ifdef CONFIG_ZTEMT_LCD_POWER_CONTRL
+void ztemt_poweron_avdd_neg(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+#if defined CONFIG_ZTEMT_MIPI_1080P_R63311_SHARP_IPS_6P4
+	/*avdd neg ctl add ,mayu 9.18 msm_dss_enable_vreg had sleep 40
+	* iovdd and avdd min interval 200ms on lcm spec*/
+	mdelay(160);
+#elif defined CONFIG_ZTEMT_MIPI_1080P_R63417_SHARP_IPS_5P5
+	/*avdd neg ctl add by lcm spec*/
+	mdelay(5);
+#else
+	mdelay(1);
+#endif
+
+	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
+		gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
+
+	if (gpio_is_valid(ctrl_pdata->avdd_neg_en_gpio))
+	  gpio_set_value((ctrl_pdata->avdd_neg_en_gpio), 1);
+
+#if defined CONFIG_ZTEMT_MIPI_2K_R63419_SHARP_IPS_5P5
+	tps65132_set_output_avdd();
+#endif
+
+#if defined CONFIG_ZTEMT_MIPI_1080P_R63417_SHARP_IPS_5P5
+	mdelay(3);
+#else
+	mdelay(1);
+#endif
+}
+
+/*Power Off by LCM spec*/
+void ztemt_poweroff_avdd_neg(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	gpio_set_value((ctrl_pdata->rst_gpio), 0);
+	gpio_free(ctrl_pdata->rst_gpio);
+	
+#if defined CONFIG_ZTEMT_MIPI_1080P_R63311_SHARP_IPS_6P4 || \
+	defined CONFIG_ZTEMT_MIPI_1080P_R63417_SHARP_IPS_5P5
+	mdelay(10);
+#endif
+
+	if (gpio_is_valid(ctrl_pdata->avdd_neg_en_gpio)) {
+		gpio_set_value((ctrl_pdata->avdd_neg_en_gpio), 0);
+	}
+
+	if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
+			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
+			gpio_free(ctrl_pdata->disp_en_gpio);
+		}
+	
+#if defined CONFIG_ZTEMT_MIPI_1080P_R63311_SHARP_IPS_6P4
+	mdelay(50);
+#elif defined CONFIG_ZTEMT_MIPI_1080P_R63417_SHARP_IPS_5P5
+	mdelay(10);
+#else
+	mdelay(100);
+#endif
+}
+#endif
+
+#ifdef CONFIG_ZTEMT_MIPI_1080P_R63311_SHARP_IPS_5P0_NX507J
+
+#define MIN_PWM_DUTY_NX507J 172
+
+u32 ztemt_pwm_adjust_r63311_sharp_ips_5p0_nx507j(u32 old_duty)
+{
+    //calculation formula is got by actual test
+    u32 act_duty = 0;
+    act_duty = old_duty + old_duty * 19 / 100 + 53;
+
+    if(act_duty < MIN_PWM_DUTY_NX507J)
+        act_duty = MIN_PWM_DUTY_NX507J;
+
+#ifdef CONFIG_ZTEMT_LCD_DEBUG_EN
+    printk(KERN_ERR"-----[%s] old = %d, new = %d\n", __func__, old_duty, act_duty);
+#endif
+
+    return act_duty;
+}
+#endif
+
+/*luochangyang END*/
+
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -242,8 +342,12 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			return rc;
 		}
 		if (!pinfo->panel_power_on) {
+#ifdef CONFIG_ZTEMT_LCD_POWER_CONTRL
+			ztemt_poweron_avdd_neg(ctrl_pdata);
+#else
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
+#endif
 
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
@@ -266,12 +370,16 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
+#ifdef CONFIG_ZTEMT_LCD_POWER_CONTRL
+		ztemt_poweroff_avdd_neg(ctrl_pdata);
+#else
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
 		gpio_set_value((ctrl_pdata->rst_gpio), 0);
 		gpio_free(ctrl_pdata->rst_gpio);
+#endif
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
 	}
@@ -426,6 +534,9 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 				panel_data);
 	mipi  = &pdata->panel_info.mipi;
 
+#if defined(CONFIG_ZTEMT_NX404H_LCD) || defined(CONFIG_ZTEMT_NE501_LCD)
+	zte_ctrl_post = ctrl;
+#endif
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
 	if (ctrl->on_cmds.cmd_cnt)
@@ -434,6 +545,23 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
+#ifdef CONFIG_ZTEMT_NX404H_LCD
+int mipi_lcd_on_post(void)
+{
+	static bool is_firsttime = true;
+	if (is_firsttime) {
+		is_firsttime = false;
+		return 0;
+	}
+
+	if (zte_ctrl_post && zte_ctrl_post->on_cmds_post.cmd_cnt) {
+		mdss_dsi_panel_cmds_send(zte_ctrl_post, &zte_ctrl_post->on_cmds_post);
+	}
+
+	 return 0;
+}
+#endif
+
 
 static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
@@ -1223,6 +1351,10 @@ static int mdss_panel_parse_dt(struct device_node *np,
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->on_cmds,
 		"qcom,mdss-dsi-on-command", "qcom,mdss-dsi-on-command-state");
+#ifdef CONFIG_ZTEMT_NX404H_LCD
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->on_cmds_post,
+		"qcom,mdss-dsi-on-command_post", "qcom,mdss-dsi-on-command-state");
+#endif
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->off_cmds,
 		"qcom,mdss-dsi-off-command", "qcom,mdss-dsi-off-command-state");
@@ -1263,6 +1395,10 @@ int mdss_dsi_panel_init(struct device_node *node,
 						__func__, __LINE__);
 	else
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
+
+#if defined(CONFIG_ZTEMT_NE501_LCD) || defined(CONFIG_ZTEMT_NX404H_LCD)
+		if (panel_name) ctrl_pdata->panel_name = (char *)panel_name;
+#endif
 
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
 	if (rc) {
